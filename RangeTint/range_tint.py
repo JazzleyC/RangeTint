@@ -21,7 +21,7 @@ except ImportError:
     from PySide2 import QtCore, QtGui, QtWidgets
 
 
-VERSION = "3.2.4"
+VERSION = "3.2.5"
 AUTHOR = "JazzleyVFX"
 WEBSITE = "https://jazzley.nl"
 PREFIX = "range_tint_"
@@ -642,17 +642,19 @@ class _ViewerUI(QtCore.QObject):
 
         # Nuke's Viewer tool palette is made of either one narrow container or
         # several small tool buttons. Keep the fallback indicator to its right.
-        # The small fallback inset also covers builds that do not expose useful
-        # Qt class/object names for the native palette.
-        palette_right = origin.x() + max(40, self.target.fontMetrics().height() * 2)
+        # Some Nuke layouts already place Image_Window to the right of this
+        # palette. Start at the real canvas origin and add an inset only when
+        # actual vertically stacked tools overlap that origin.
+        palette_right = origin.x()
         small_tools = 0
+        tall_tools = 0
         for widget in self.target.findChildren(QtWidgets.QWidget):
             try:
                 if widget is self.canvas or widget.property("rangeTintOverlay") or not widget.isVisible():
                     continue
                 widget_origin = widget.mapTo(self.target, QtCore.QPoint(0, 0))
                 widget_right = widget_origin.x() + widget.width()
-                near_left = origin.x() - 4 <= widget_origin.x() <= origin.x() + 96
+                near_left = origin.x() - 4 <= widget_origin.x() <= origin.x() + 48
                 overlaps_canvas = (
                     widget_origin.y() < origin.y() + self.canvas.height()
                     and widget_origin.y() + widget.height() > top
@@ -663,13 +665,12 @@ class _ViewerUI(QtCore.QObject):
                     small_tools += 1
                     palette_right = max(palette_right, widget_right + 4)
                 elif widget.width() <= 96 and widget.height() >= 100:
+                    tall_tools += 1
                     palette_right = max(palette_right, widget_right + 4)
             except RuntimeError:
                 pass
-        if small_tools >= 2 or palette_right > origin.x() + 40:
+        if small_tools >= 2 or tall_tools:
             left = max(left, float(palette_right))
-        else:
-            left = max(left, float(origin.x() + 40))
 
         # Detect wide native header/ruler rows instead of relying exclusively
         # on a fixed inset. This remains stable across UI scaling and layouts.
