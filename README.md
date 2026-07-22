@@ -36,7 +36,7 @@ Nuke release.
 
 ## Installation
 
-1. Download `RangeTint-3.2.3-Nuke14.1-Windows.zip` from GitHub Releases.
+1. Download `RangeTint-3.2.4-Nuke14.1-Windows.zip` from GitHub Releases.
 2. Copy the included `RangeTint` directory to:
 
    ```text

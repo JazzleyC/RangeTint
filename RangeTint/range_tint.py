@@ -21,7 +21,7 @@ except ImportError:
     from PySide2 import QtCore, QtGui, QtWidgets
 
 
-VERSION = "3.2.3"
+VERSION = "3.2.4"
 AUTHOR = "JazzleyVFX"
 WEBSITE = "https://jazzley.nl"
 PREFIX = "range_tint_"
@@ -317,6 +317,7 @@ class _FrameBorderOverlay(QtCore.QObject):
         self.canvas_rect = QtCore.QRectF()
         self.canvas_origin = QtCore.QPointF()
         self.exclusion_rects = []
+        self.protect_overlay_status = False
         self.current_frame = int(nuke.frame())
         self.rails = []
         for side in ("Top", "Bottom", "Left", "Right"):
@@ -333,9 +334,10 @@ class _FrameBorderOverlay(QtCore.QObject):
         self.canvas_origin = QtCore.QPointF(origin)
         self.canvas_rect = QtCore.QRectF(rect)
 
-    def set_exclusions(self, rects):
+    def set_exclusions(self, rects, protect_overlay_status=False):
         """Cut host controls out of the rails instead of drawing over them."""
         self.exclusion_rects = [QtCore.QRect(rect) for rect in rects if not rect.isEmpty()]
+        self.protect_overlay_status = bool(protect_overlay_status)
         self._layout_rails()
 
     def set_state(self, config, frame_rect, frame):
@@ -412,6 +414,22 @@ class _FrameBorderOverlay(QtCore.QObject):
             QtCore.QRect(left, vertical_top, left_width, vertical_bottom - vertical_top),
             QtCore.QRect(right, vertical_top, right_width, vertical_bottom - vertical_top),
         )
+        exclusions = list(self.exclusion_rects)
+        if self.protect_overlay_status:
+            # Nuke renders the red "Overlay Off" notice directly into the GL
+            # Viewer, so it cannot be discovered as a QWidget. Leave a short
+            # gap only in the upper part of the left rail while that notice is
+            # present. The top rail remains outside the displayed image.
+            status_width = max(96, self.host.fontMetrics().horizontalAdvance("Overlay Off") + 18)
+            status_height = max(22, self.host.fontMetrics().height() + 8)
+            exclusions.append(
+                QtCore.QRect(
+                    left - status_width,
+                    vertical_top,
+                    status_width + left_width + 3,
+                    status_height,
+                )
+            )
         for rail, rail_rect in zip(self.rails, rail_rects):
             visible_rect = rail_rect.intersected(clip)
             if visible_rect.isEmpty():
@@ -422,7 +440,7 @@ class _FrameBorderOverlay(QtCore.QObject):
             rail.setPalette(palette)
             rail.setGeometry(visible_rect)
             mask = QtGui.QRegion(QtCore.QRect(0, 0, visible_rect.width(), visible_rect.height()))
-            for exclusion in self.exclusion_rects:
+            for exclusion in exclusions:
                 overlap = visible_rect.intersected(exclusion)
                 if not overlap.isEmpty():
                     local_overlap = overlap.translated(-visible_rect.x(), -visible_rect.y())
@@ -690,7 +708,13 @@ class _ViewerUI(QtCore.QObject):
         exclusions = []
         if hasattr(self, "button") and self.button.isVisible():
             exclusions.append(self.button.geometry().adjusted(-5, -5, 5, 5))
-        self.frame_border.set_exclusions(exclusions)
+        protect_overlay_status = False
+        try:
+            viewer = nuke.activeViewer()
+            protect_overlay_status = viewer is not None and not viewer.isOverlayShown()
+        except (AttributeError, RuntimeError):
+            pass
+        self.frame_border.set_exclusions(exclusions, protect_overlay_status)
 
     def _sync_timeline(self):
         # A narrow strip lives inside the bottom edge of TimeSlider, where it
