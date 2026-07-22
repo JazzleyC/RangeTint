@@ -21,7 +21,7 @@ except ImportError:
     from PySide2 import QtCore, QtGui, QtWidgets
 
 
-VERSION = "3.2.2"
+VERSION = "3.2.3"
 AUTHOR = "JazzleyVFX"
 WEBSITE = "https://jazzley.nl"
 PREFIX = "range_tint_"
@@ -316,6 +316,7 @@ class _FrameBorderOverlay(QtCore.QObject):
         self.frame_rect = QtCore.QRectF()
         self.canvas_rect = QtCore.QRectF()
         self.canvas_origin = QtCore.QPointF()
+        self.exclusion_rects = []
         self.current_frame = int(nuke.frame())
         self.rails = []
         for side in ("Top", "Bottom", "Left", "Right"):
@@ -331,6 +332,11 @@ class _FrameBorderOverlay(QtCore.QObject):
     def set_canvas_geometry(self, origin, rect):
         self.canvas_origin = QtCore.QPointF(origin)
         self.canvas_rect = QtCore.QRectF(rect)
+
+    def set_exclusions(self, rects):
+        """Cut host controls out of the rails instead of drawing over them."""
+        self.exclusion_rects = [QtCore.QRect(rect) for rect in rects if not rect.isEmpty()]
+        self._layout_rails()
 
     def set_state(self, config, frame_rect, frame):
         self.config = config
@@ -415,6 +421,16 @@ class _FrameBorderOverlay(QtCore.QObject):
             palette.setColor(QtGui.QPalette.Window, colour)
             rail.setPalette(palette)
             rail.setGeometry(visible_rect)
+            mask = QtGui.QRegion(QtCore.QRect(0, 0, visible_rect.width(), visible_rect.height()))
+            for exclusion in self.exclusion_rects:
+                overlap = visible_rect.intersected(exclusion)
+                if not overlap.isEmpty():
+                    local_overlap = overlap.translated(-visible_rect.x(), -visible_rect.y())
+                    mask = mask.subtracted(QtGui.QRegion(local_overlap))
+            if mask.isEmpty():
+                rail.hide()
+                continue
+            rail.setMask(mask)
             rail.show()
             rail.raise_()
 
@@ -474,6 +490,7 @@ class _MovableToggle(QtWidgets.QPushButton):
                 x = max(4, min(parent.width() - self.width() - 4, proposed.x()))
                 y = max(32, min(parent.height() - self.height() - 4, proposed.y()))
                 self.move(x, y)
+                self.owner.update_border_exclusions()
                 event.accept()
                 return
         super(_MovableToggle, self).mouseMoveEvent(event)
@@ -605,6 +622,37 @@ class _ViewerUI(QtCore.QObject):
         right = float(origin.x() + self.canvas.width())
         bottom = float(origin.y() + self.canvas.height())
 
+        # Nuke's Viewer tool palette is made of either one narrow container or
+        # several small tool buttons. Keep the fallback indicator to its right.
+        # The small fallback inset also covers builds that do not expose useful
+        # Qt class/object names for the native palette.
+        palette_right = origin.x() + max(40, self.target.fontMetrics().height() * 2)
+        small_tools = 0
+        for widget in self.target.findChildren(QtWidgets.QWidget):
+            try:
+                if widget is self.canvas or widget.property("rangeTintOverlay") or not widget.isVisible():
+                    continue
+                widget_origin = widget.mapTo(self.target, QtCore.QPoint(0, 0))
+                widget_right = widget_origin.x() + widget.width()
+                near_left = origin.x() - 4 <= widget_origin.x() <= origin.x() + 96
+                overlaps_canvas = (
+                    widget_origin.y() < origin.y() + self.canvas.height()
+                    and widget_origin.y() + widget.height() > top
+                )
+                if not near_left or not overlaps_canvas:
+                    continue
+                if 14 <= widget.width() <= 80 and 14 <= widget.height() <= 80:
+                    small_tools += 1
+                    palette_right = max(palette_right, widget_right + 4)
+                elif widget.width() <= 96 and widget.height() >= 100:
+                    palette_right = max(palette_right, widget_right + 4)
+            except RuntimeError:
+                pass
+        if small_tools >= 2 or palette_right > origin.x() + 40:
+            left = max(left, float(palette_right))
+        else:
+            left = max(left, float(origin.x() + 40))
+
         # Detect wide native header/ruler rows instead of relying exclusively
         # on a fixed inset. This remains stable across UI scaling and layouts.
         for widget in self.target.findChildren(QtWidgets.QWidget):
@@ -636,6 +684,13 @@ class _ViewerUI(QtCore.QObject):
             )
         else:
             self.frame_border.set_canvas_geometry(QtCore.QPointF(), QtCore.QRectF())
+        self.update_border_exclusions()
+
+    def update_border_exclusions(self):
+        exclusions = []
+        if hasattr(self, "button") and self.button.isVisible():
+            exclusions.append(self.button.geometry().adjusted(-5, -5, 5, 5))
+        self.frame_border.set_exclusions(exclusions)
 
     def _sync_timeline(self):
         # A narrow strip lives inside the bottom edge of TimeSlider, where it
@@ -664,18 +719,18 @@ class _ViewerUI(QtCore.QObject):
         canvas = self._find_canvas()
         if canvas is not None and canvas is not self.canvas:
             self._attach_canvas(canvas)
-        self._sync_canvas_rect()
-        native_rect = _native_frame_rect(self.canvas)
-        self.frame_rect = native_rect if native_rect is not None else QtCore.QRectF()
-        self._sync_timeline()
-        self._update_border()
-
         width, height = self.target.width(), self.target.height()
         if not self.button.is_dragging:
             button_width, button_height = 88, 24
             x = max(4, min(width - button_width - 4, int(self.config.get("button_x", 12))))
             y = max(32, min(height - button_height - 4, int(self.config.get("button_y", 72))))
             self.button.setGeometry(x, y, button_width, button_height)
+
+        self._sync_canvas_rect()
+        native_rect = _native_frame_rect(self.canvas)
+        self.frame_rect = native_rect if native_rect is not None else QtCore.QRectF()
+        self._sync_timeline()
+        self._update_border()
         self.button.raise_()
 
     def save_button_position(self):
