@@ -1,0 +1,11 @@
+native/build/
+__pycache__/
+*.py[cod]
+*.pdb
+*.exp
+*.lib
+*.zip
+.vs/
+.vscode/
+.idea/
+
