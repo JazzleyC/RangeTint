@@ -6,6 +6,8 @@ Range Tint is a Viewer-only range indicator for Foundry Nuke and NukeX. It
 shows whether the current frame is inside or outside one or more delivery
 ranges without modifying the image or node graph.
 
+![Range Tint Viewer overview](docs/images/range-tint-overview.svg)
+
 ## Features
 
 - Colored rails around the displayed frame.
@@ -55,6 +57,8 @@ Range Tint remains passive at startup. Loading the menu does not create timers
 or Viewer widgets until **Start** is selected.
 
 ## Settings
+
+![Range Tint settings and keyboard shortcuts](docs/images/range-tint-settings.svg)
 
 Open **Range Tint > Settings...**. Available settings include:
 

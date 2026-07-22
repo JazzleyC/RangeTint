@@ -2,5 +2,5 @@
 *.cpp text eol=lf
 *.txt text eol=lf
 *.md text eol=lf
+*.svg text eol=lf
 *.dll binary
-
